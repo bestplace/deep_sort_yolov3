@@ -1,30 +1,24 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import division, print_function, absolute_import
-
 from timeit import time
-import warnings
 import cv2
 import numpy as np
 from PIL import Image
-from PIL import ImageFilter
 from yolo import YOLO
-
-from deep_sort import preprocessing
-warnings.filterwarnings('ignore')
-
 from sort.sort import Sort
 
+from preprocessing import non_max_suppression
 
-def main(yolo,
-         videofile='test.mp4',
-         csv_file='tracks.csv',
-         out_videofile='output.avi',
-         writeVideo_flag=False,
-         show_video=False,
-         verbose=False,
-         skip=0):
+
+def track(yolo,
+          videofile='test.mp4',
+          csv_file='tracks.csv',
+          out_videofile='output.avi',
+          writeVideo_flag=False,
+          show_video=False,
+          verbose=False,
+          skip=0):
 
     class_names = yolo.class_names
 
@@ -79,7 +73,7 @@ def main(yolo,
         # Run non-maxima suppression.
         boxes = np.array([d[2:] for d in bboxes])
         scores = np.array([d[1] for d in bboxes])
-        indices = preprocessing.non_max_suppression(boxes, nms_max_overlap, scores)
+        indices = non_max_suppression(boxes, nms_max_overlap, scores)
         detections = np.array([bboxes[i] for i in indices])
         bboxes = []
         for detection in detections:
@@ -148,5 +142,6 @@ def main(yolo,
     list_file.close()
     cv2.destroyAllWindows()
 
+
 if __name__ == '__main__':
-    main(YOLO())
+    track(YOLO())
