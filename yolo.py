@@ -4,6 +4,9 @@
 Run a YOLO_v3 style detection model on test images.
 """
 
+import time as ttime
+
+
 import colorsys
 import os
 import random
@@ -15,22 +18,25 @@ from keras import backend as K
 from keras.models import load_model
 from PIL import Image, ImageFont, ImageDraw
 
+
 from yolo3.model import yolo_eval
 from yolo3.utils import letterbox_image
 
 class YOLO(object):
-    def __init__(self):
-        self.model_path = 'model_data/yolo.h5'
-        self.anchors_path = 'model_data/yolo_anchors.txt'
-        self.classes_path = 'model_data/coco_classes.txt'
+    def __init__(self, classes_to_detect):
+        self.model_path = 'deep_sort_yolov3/model_data/yolo.h5'
+        self.anchors_path = 'deep_sort_yolov3/model_data/yolo_anchors.txt'
+        self.classes_path = 'deep_sort_yolov3/model_data/coco_classes.txt'
         self.score = 0.5
         self.iou = 0.5
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.model_image_size = (416, 416) # fixed size or (None, None)
+        # self.model_image_size = (160, 160)
         self.is_fixed_size = self.model_image_size != (None, None)
         self.boxes, self.scores, self.classes = self.generate()
+        self.classes_to_detect = set(classes_to_detect)
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -81,12 +87,14 @@ class YOLO(object):
             new_image_size = (image.width - (image.width % 32),
                               image.height - (image.height % 32))
             boxed_image = letterbox_image(image, new_image_size)
+        #print(image.size)
+
         image_data = np.array(boxed_image, dtype='float32')
 
         #print(image_data.shape)
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-        
+        # inf_time = ttime.time()
         out_boxes, out_scores, out_classes = self.sess.run(
             [self.boxes, self.scores, self.classes],
             feed_dict={
@@ -94,15 +102,17 @@ class YOLO(object):
                 self.input_image_shape: [image.size[1], image.size[0]],
                 K.learning_phase(): 0
             })
+        # print('graph_inf: {:.2f}'.format(ttime.time()-inf_time), end='; ')
+        # inf_time = ttime.time()
         return_boxs = []
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
-            if predicted_class != 'person' :
+            if not predicted_class in self.classes_to_detect:
                 continue
             box = out_boxes[i]
-           # score = out_scores[i]  
-            x = int(box[1])  
-            y = int(box[0])  
+            score = out_scores[i]
+            x = int(box[1])
+            y = int(box[0])
             w = int(box[3]-box[1])
             h = int(box[2]-box[0])
             if x < 0 :
@@ -110,9 +120,9 @@ class YOLO(object):
                 x = 0
             if y < 0 :
                 h = h + y
-                y = 0 
-            return_boxs.append([x,y,w,h])
-
+                y = 0
+            return_boxs.append([c,score,x,y,w,h])
+        # print('bboxes_time: {:.2f}'.format(ttime.time()-inf_time), end='; ')
         return return_boxs
 
     def close_session(self):

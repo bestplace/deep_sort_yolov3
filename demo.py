@@ -3,109 +3,149 @@
 
 from __future__ import division, print_function, absolute_import
 
-import os
 from timeit import time
 import warnings
-import sys
 import cv2
 import numpy as np
 from PIL import Image
+from PIL import ImageFilter
 from yolo import YOLO
 
 from deep_sort import preprocessing
-from deep_sort import nn_matching
-from deep_sort.detection import Detection
-from deep_sort.tracker import Tracker
-from tools import generate_detections as gdet
-from deep_sort.detection import Detection as ddet
 warnings.filterwarnings('ignore')
 
-def main(yolo):
+from sort import Sort
 
-   # Definition of the parameters
-    max_cosine_distance = 0.3
-    nn_budget = None
+
+def main(yolo,
+         videofile='test.mp4',
+         csv_file='tracks.csv',
+         out_videofile='output.avi',
+         writeVideo_flag=False,
+         show_video=False,
+         verbose=False,
+         skip=0):
+
+    class_names = yolo.class_names
+
     nms_max_overlap = 1.0
-    
-   # deep_sort 
-    model_filename = 'model_data/mars-small128.pb'
-    encoder = gdet.create_box_encoder(model_filename,batch_size=1)
-    
-    metric = nn_matching.NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
-    tracker = Tracker(metric)
 
-    writeVideo_flag = True 
-    
-    video_capture = cv2.VideoCapture(0)
+    tracker = Sort(max_age=3, min_hits=1)
 
+    video_capture = cv2.VideoCapture(videofile)
+
+    w, h = int(video_capture.get(3)), int(video_capture.get(4))
     if writeVideo_flag:
-    # Define the codec and create VideoWriter object
-        w = int(video_capture.get(3))
-        h = int(video_capture.get(4))
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        out = cv2.VideoWriter('output.avi', fourcc, 15, (w, h))
-        list_file = open('detection.txt', 'w')
-        frame_index = -1 
-        
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        out = cv2.VideoWriter(out_videofile, fourcc, 24, (w, h))
+
+    frame_index = -1
+    list_file = open(csv_file, 'w')
+    list_file.write('frame_index,track_id,class_id,left,top,right,bottom,color\n')
+
     fps = 0.0
-    while True:
-        ret, frame = video_capture.read()  # frame shape 640*480*3
-        if ret != True:
-            break;
-        t1 = time.time()
 
-        image = Image.fromarray(frame)
-        boxs = yolo.detect_image(image)
-       # print("box_num",len(boxs))
-        features = encoder(frame,boxs)
-        
-        # score to 1.0 here).
-        detections = [Detection(bbox, 1.0, feature) for bbox, feature in zip(boxs, features)]
-        
+    skip += 1
+
+    end = False
+
+    while not end:
+        if verbose:
+            start_time = time.time()
+            t1 = time.time()
+
+        for _ in range(skip):
+            ret, frame = video_capture.read()
+            if not ret:
+                end = True
+                break
+            frame_index += 1
+        if end:
+            break
+
+        if verbose:
+            lasts = time.time() - start_time
+            print('preproc: {0:.2f}s'.format(lasts), end='; ')
+            start_time = time.time()
+        frame = Image.fromarray(frame)
+        bboxes = yolo.detect_image(frame)
+        frame = np.array(frame)
+
+        if verbose:
+            lasts = time.time() - start_time
+            print('inference: {0:.2f}s'.format(lasts), end='; ')
+            start_time = time.time()
+
         # Run non-maxima suppression.
-        boxes = np.array([d.tlwh for d in detections])
-        scores = np.array([d.confidence for d in detections])
+        boxes = np.array([d[2:] for d in bboxes])
+        scores = np.array([d[1] for d in bboxes])
         indices = preprocessing.non_max_suppression(boxes, nms_max_overlap, scores)
-        detections = [detections[i] for i in indices]
-        
-        # Call the tracker
-        tracker.predict()
-        tracker.update(detections)
-        
-        for track in tracker.tracks:
-            if track.is_confirmed() and track.time_since_update >1 :
-                continue 
-            bbox = track.to_tlbr()
-            cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])),(255,255,255), 2)
-            cv2.putText(frame, str(track.track_id),(int(bbox[0]), int(bbox[1])),0, 5e-3 * 200, (0,255,0),2)
+        detections = np.array([bboxes[i] for i in indices])
+        bboxes = []
+        for detection in detections:
+            bboxes.append(detection)
 
-        for det in detections:
-            bbox = det.to_tlbr()
-            cv2.rectangle(frame,(int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])),(255,0,0), 2)
-            
-        cv2.imshow('', frame)
-        
+        if verbose:
+            lasts = time.time() - start_time
+            print('postproc: {0:.2f}s'.format(lasts), end='; ')
+            start_time = time.time()
+        frame = np.array(frame)
+        if len(bboxes) == 0:
+            if show_video:
+                cv2.imshow('', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            if writeVideo_flag:
+                out.write(frame)
+
+            if verbose:
+                fps = (fps + (1. / (time.time() - t1))) / 2
+                print("fps= %f" % (fps), end='; ')
+            continue
+
+        bboxes = np.array(bboxes)
+        bboxes[:, 4:] = bboxes[:, 4:] + bboxes[:, 2:4]
+
+        tracks = tracker.update(bboxes[:, 2:], bboxes[:, 0])
+
+        if show_video or writeVideo_flag:
+            for track in tracks:
+                track_id = track[-2]
+                class_ = class_names[int(track[-1])]
+                bbox = track[:-1]
+
+        if show_video:
+            cv2.imshow('', frame)
+
         if writeVideo_flag:
             # save a frame
             out.write(frame)
-            frame_index = frame_index + 1
-            list_file.write(str(frame_index)+' ')
-            if len(boxs) != 0:
-                for i in range(0,len(boxs)):
-                    list_file.write(str(boxs[i][0]) + ' '+str(boxs[i][1]) + ' '+str(boxs[i][2]) + ' '+str(boxs[i][3]) + ' ')
-            list_file.write('\n')
-            
-        fps  = ( fps + (1./(time.time()-t1)) ) / 2
-        print("fps= %f"%(fps))
-        
+            if len(tracks) > 0:
+                for track in tracks:
+                    list_file.write(str(frame_index)+',')
+                    track_id = track[-2]
+                    class_ = track[-1]
+                    bbox = map(lambda x: str(int(x)), track[:-2])
+                    list_file.write(str(int(track_id))+',')
+                    list_file.write(str(int(class_))+',')
+                    list_file.write(','.join(bbox)+','+str(np.random.randint(7))+'\n')
+
+        if verbose:
+            fps = (fps + (1. / (time.time() - t1))) / 2
+            print("fps= %f" % (fps), end='; ')
+
         # Press Q to stop!
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+        if verbose:
+            lasts = time.time() - start_time
+            print('writing: {0:.2f}s'.format(lasts), end='\n')
+
     video_capture.release()
     if writeVideo_flag:
         out.release()
-        list_file.close()
+    list_file.close()
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
