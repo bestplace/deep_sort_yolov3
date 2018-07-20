@@ -5,10 +5,9 @@ from timeit import time
 import cv2
 import numpy as np
 from PIL import Image
-from yolo import YOLO
-from sort.sort import Sort
+from .sort.sort import Sort
 
-from preprocessing import non_max_suppression
+from .preprocessing import non_max_suppression
 
 
 def track(yolo,
@@ -141,7 +140,3 @@ def track(yolo,
         out.release()
     list_file.close()
     cv2.destroyAllWindows()
-
-
-if __name__ == '__main__':
-    track(YOLO())
