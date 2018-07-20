@@ -14,7 +14,7 @@ from yolo import YOLO
 from deep_sort import preprocessing
 warnings.filterwarnings('ignore')
 
-from sort import Sort
+from sort.sort import Sort
 
 
 def main(yolo,
@@ -37,7 +37,7 @@ def main(yolo,
     w, h = int(video_capture.get(3)), int(video_capture.get(4))
     if writeVideo_flag:
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        out = cv2.VideoWriter(out_videofile, fourcc, 24, (w, h))
+        out = cv2.VideoWriter(out_videofile, fourcc, 60, (w, h))
 
     frame_index = -1
     list_file = open(csv_file, 'w')
