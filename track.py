@@ -3,11 +3,25 @@
 
 from timeit import time
 import cv2
+import csv
 import numpy as np
 from PIL import Image
 from .sort.sort import Sort
 
 from .preprocessing import non_max_suppression
+
+
+def dump_tracks(frame_index, tracks, csv_writer):
+    rows = []
+    for track in tracks:
+        track_id, class_ = track[-2], track[-1]
+        bbox = map(lambda x: str(int(x)), track[:-2])
+        rows.append((str(frame_index),
+                     int(track_id),
+                     int(class_),
+                     *bbox,
+                     np.random.randint(7)))
+    csv_writer.writerows(rows)
 
 
 def track(yolo,
@@ -33,8 +47,17 @@ def track(yolo,
         out = cv2.VideoWriter(out_videofile, fourcc, 60, (w, h))
 
     frame_index = -1
-    list_file = open(csv_file, 'w')
-    list_file.write('frame_index,track_id,class_id,left,top,right,bottom,color\n')
+    res_file = open(csv_file, 'w')
+
+    csv_writer = csv.writer(res_file)
+    csv_writer.writerow(('frame_index',
+                         'track_id',
+                         'class_id',
+                         'left',
+                         'top',
+                         'right',
+                         'bottom',
+                         'color'))
 
     fps = 0.0
 
@@ -104,8 +127,10 @@ def track(yolo,
         if show_video or writeVideo_flag:
             for track in tracks:
                 track_id = track[-2]
-                class_ = class_names[int(track[-1])]
+                text = ':'.join((str(track_id), class_names[int(track[-1])]))
                 bbox = track[:-1]
+                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 255, 255), 2)
+                cv2.putText(frame, text, (int(bbox[0]), int(bbox[1])), 0, 5e-3 * 200,  (0, 255, 0), 2)
 
         if show_video:
             cv2.imshow('', frame)
@@ -113,15 +138,9 @@ def track(yolo,
         if writeVideo_flag:
             # save a frame
             out.write(frame)
-            if len(tracks) > 0:
-                for track in tracks:
-                    list_file.write(str(frame_index)+',')
-                    track_id = track[-2]
-                    class_ = track[-1]
-                    bbox = map(lambda x: str(int(x)), track[:-2])
-                    list_file.write(str(int(track_id))+',')
-                    list_file.write(str(int(class_))+',')
-                    list_file.write(','.join(bbox)+','+str(np.random.randint(7))+'\n')
+
+        if len(tracks) > 0:
+            dump_tracks(frame_index, tracks, csv_writer)
 
         if verbose:
             fps = (fps + (1. / (time.time() - t1))) / 2
@@ -138,5 +157,5 @@ def track(yolo,
     video_capture.release()
     if writeVideo_flag:
         out.release()
-    list_file.close()
+    res_file.close()
     cv2.destroyAllWindows()
